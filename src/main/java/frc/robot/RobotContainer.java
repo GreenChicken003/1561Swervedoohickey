@@ -45,7 +45,11 @@ public class RobotContainer {
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
 
     /* Set to true to rotate by TWISTING the right stick instead of pushing it left/right. */
+<<<<<<< HEAD
     private static final boolean kUseTwistForRotation = true;
+=======
+    private static final boolean kUseTwistForRotation = false;
+>>>>>>> e6b82073e443e74b5df79038f26a9cb2e27a7f4d
 
     /* Setting up bindings for necessary control of the swerve drive platform */
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
@@ -57,7 +61,11 @@ public class RobotContainer {
     private final Telemetry logger = new Telemetry(MaxSpeed);
 
     private final CommandJoystick leftStick = new CommandJoystick(0);  // translation
+<<<<<<< HEAD
     private final CommandJoystick rightStick = new CommandJoystick(0); // rotation
+=======
+    private final CommandJoystick rightStick = new CommandJoystick(1); // rotation
+>>>>>>> e6b82073e443e74b5df79038f26a9cb2e27a7f4d
 
     /*
      * Driver inputs, each scaled -1 to 1. Everything below reads these instead of the
