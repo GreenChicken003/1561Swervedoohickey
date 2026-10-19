@@ -6,22 +6,46 @@ package frc.robot;
 
 import static edu.wpi.first.units.Units.*;
 
+import java.util.function.DoubleSupplier;
+
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
-import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+import edu.wpi.first.wpilibj2.command.button.CommandJoystick;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 
+/*
+ * DRIVER CONTROLS - two Thrustmaster T.16000M flight sticks
+ *
+ *   LEFT stick  (Driver Station USB slot 0) = translation
+ *     Push stick ............. drive (field-centric)
+ *     Trigger (button 1) ..... hold: point wheels where the left stick is aimed
+ *     Thumb   (button 2) ..... reset field-centric heading (face away from driver station first!)
+ *     Base buttons 5-8 ....... SysId (see bottom of configureBindings)
+ *
+ *   RIGHT stick (Driver Station USB slot 1) = rotation
+ *     Push stick left/right .. rotate robot (or twist - see kUseTwistForRotation)
+ *     Trigger (button 1) ..... hold: brake / X-lock wheels
+ *
+ *   Free for future mechanisms: buttons 3-4 and the hat switch on both sticks,
+ *   right-stick base buttons, and left-stick base buttons 9-16.
+ *
+ * Both sticks report the same name, so the Driver Station can swap them after a
+ * reboot or re-plug. Check the USB tab before every match!
+ */
 public class RobotContainer {
-    private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
+    private double MaxSpeed = .6 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
+
+    /* Set to true to rotate by TWISTING the right stick instead of pushing it left/right. */
+    private static final boolean kUseTwistForRotation = true;
 
     /* Setting up bindings for necessary control of the swerve drive platform */
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
@@ -32,7 +56,21 @@ public class RobotContainer {
 
     private final Telemetry logger = new Telemetry(MaxSpeed);
 
-    private final CommandXboxController joystick = new CommandXboxController(0);
+    private final CommandJoystick leftStick = new CommandJoystick(0);  // translation
+    private final CommandJoystick rightStick = new CommandJoystick(0); // rotation
+
+    /*
+     * Driver inputs, each scaled -1 to 1. Everything below reads these instead of the
+     * sticks directly, so swapping controllers later only means changing these three lines.
+     *
+     * Flight sticks read NEGATIVE when pushed forward or left, same as an Xbox stick,
+     * so the signs match the original Xbox code.
+     */
+    private final DoubleSupplier forwardInput = () -> -leftStick.getY();  // push forward = drive forward (+X)
+    private final DoubleSupplier strafeInput  = () -> -leftStick.getX();  // push left = drive left (+Y)
+    private final DoubleSupplier rotateInput  = () -> kUseTwistForRotation
+            ? -rightStick.getTwist()  // twist left = counterclockwise
+            : -rightStick.getX();     // push left  = counterclockwise
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
 
@@ -46,9 +84,9 @@ public class RobotContainer {
         drivetrain.setDefaultCommand(
             // Drivetrain will execute this command periodically
             drivetrain.applyRequest(() ->
-                drive.withVelocityX(-joystick.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
-                    .withVelocityY(-joystick.getLeftX() * MaxSpeed) // Drive left with negative X (left)
-                    .withRotationalRate(-joystick.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
+                drive.withVelocityX(forwardInput.getAsDouble() * MaxSpeed)
+                    .withVelocityY(strafeInput.getAsDouble() * MaxSpeed)
+                    .withRotationalRate(rotateInput.getAsDouble() * MaxAngularRate)
             )
         );
 
@@ -59,20 +97,24 @@ public class RobotContainer {
             drivetrain.applyRequest(() -> idle).ignoringDisable(true)
         );
 
-        joystick.a().whileTrue(drivetrain.applyRequest(() -> brake));
-        joystick.b().whileTrue(drivetrain.applyRequest(() ->
-            point.withModuleDirection(new Rotation2d(-joystick.getLeftY(), -joystick.getLeftX()))
+        // Right trigger: hold to X-lock the wheels (was Xbox A)
+        rightStick.trigger().whileTrue(drivetrain.applyRequest(() -> brake));
+
+        // Left trigger: hold to point the wheels in the direction the left stick is aimed (was Xbox B)
+        leftStick.trigger().whileTrue(drivetrain.applyRequest(() ->
+            point.withModuleDirection(new Rotation2d(forwardInput.getAsDouble(), strafeInput.getAsDouble()))
         ));
 
-        // Run SysId routines when holding back/start and X/Y.
-        // Note that each routine should be run exactly once in a single log.
-        joystick.back().and(joystick.y()).whileTrue(drivetrain.sysIdDynamic(Direction.kForward));
-        joystick.back().and(joystick.x()).whileTrue(drivetrain.sysIdDynamic(Direction.kReverse));
-        joystick.start().and(joystick.y()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kForward));
-        joystick.start().and(joystick.x()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
+        // Left thumb button: reset the field-centric heading (was Xbox left bumper)
+        leftStick.top().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
 
-        // Reset the field-centric heading on left bumper press.
-        joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
+        // SysId on the left stick base (was Xbox back/start + Y/X).
+        // Hold 5 (dynamic) or 6 (quasistatic), then hold 7 (forward) or 8 (reverse).
+        // Note that each routine should be run exactly once in a single log.
+        leftStick.button(5).and(leftStick.button(7)).whileTrue(drivetrain.sysIdDynamic(Direction.kForward));
+        leftStick.button(5).and(leftStick.button(8)).whileTrue(drivetrain.sysIdDynamic(Direction.kReverse));
+        leftStick.button(6).and(leftStick.button(7)).whileTrue(drivetrain.sysIdQuasistatic(Direction.kForward));
+        leftStick.button(6).and(leftStick.button(8)).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
 
         drivetrain.registerTelemetry(logger::telemeterize);
     }
